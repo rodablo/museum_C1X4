@@ -1,0 +1,105 @@
+;
+;******  Central Telefonica 1 x 4 + portero version 1.0      21 abr 88  ******
+;*                                                                           *
+;*       Segmento: EXIN.SEG                                                  *
+;*       Funcion : Atencion de la interrupcion externa, Discado y            *
+;*                 coneccion con la linea externa, Driver de la campana      *
+;******            Timer's varios, Generacion de las cadencias.         ******
+;
+;
+;
+;------------------------------ DISCADO
+
+
+    IF KIT EQ 1
+EIN     LDA    $800
+        BRCLR   7,DBUFF0,ONL            ;ESTA LINEA CONECTADA? SI, SALTA
+    ENDIF
+    IF KIT EQ 0
+EIN     BRCLR   7,DBUFF0,ONL            ;ESTA LINEA CONECTADA? SI, SALTA
+    ENDIF
+        BCLR    RELE,PDA                ;NO, ABRE RELE ** DESCONEXION FISICA ***
+        BCLR    DPPE,F4                 ;BORRA FLAG
+        BCLR    DTID,F4                 ;BORRA FLAG
+        BRA     EIN21                   ;BORRA DTID Y CONTINUA
+ONL     BRSET   DPPE,F4,SIDPPE          ;ESTA DISCANDO UN PULSO? SI, SALTA
+        TST     DBUFF0                  ;HAY DIGITO O FALTAN PULSOS?
+        BNE     FALDPPE                 ;FALTAN PULSOS? SI, SALTA
+        BSET    RELE,PDA                ;CIERRA RELE ** CONEXION FISICA **
+        BRCLR   DTID,F4,EIN2            ;TERMINO CON DTID? SI ,SALTA
+        BRA     SIDPPE                  ;NO, A TERMINAR
+FALDPPE DEC     DBUFF0                  ;SI, DECREMENTA
+        BSET    DPPE,F4                 ;SET FLAG DE PULSO EN PROSESO
+        BSET    DTID,F4                 ;SET FLAG DE TIEMPO INTER DIGITO
+        LDA     #45                     ;ACC. = TIEMPO TOTAL (45 X 20 MS)
+        STA     DTIMER                  ;AL CONTADOR
+        BCLR    RELE,PDA                ;ABRE EL RELE
+SIDPPE  LDA     DTIMER                  ;ACC. = TIEMPO DEL PULSO
+        DEC     DTIMER                  ;DECREMENTA PARA PROXIMA PASADA
+        CMP     #43                     ;TERMINO EL PULSO? (3 X 20 MS)
+        BHS     EIN2                    ;NO, SALTA
+        BSET    RELE,PDA                ;SI, CIERRA EL RELE
+        CMP     #42                     ;TERMINO EL INTER PULSO? (2 X 20 MS)
+        BHS     EIN2                    ;NO, SALTA
+        BCLR    DPPE,F4                 ;SI, RESET FLAG DE PULSO EN PROCESO
+        CMP     #1                      ;TERMINO EL INTER DIGITO? (40 X 20 MS)
+        BHS     EIN2                    ;NO, SALTA
+EIN21   BCLR    DTID,F4                 ;SI, RESET FLAG
+
+;------------------------------ TEMPOS (REVISAR CON 1 SEGUNDO)
+
+EIN2    DEC     TIMEDIV                 ;DECREMENTA DIVISOR
+        BNE     EIN3                    ;0? NO, SALTA
+        LDA     #50                     ;50 X 20MS = 1S
+        STA     TIMEDIV                 ;SETEA DIVISOR
+
+        BRCLR   7,TIMEOUT,EIN23         ;YA ESTA EN 0? SI SALTA
+        INC     TIMEOUT                 ;NO INCREMENTA TIMER
+EIN23   BRCLR   7,RINGVAL,EIN24         ;YA ESTA EN 0? SI SALTA
+        INC     RINGVAL                 ;NO INCREMENTA TIMER
+EIN24   BRSET   7,PORTEDL,EIN25         ;YA ESTA EN 0? NO SALTA
+        BCLR    PORTECR,PDA             ;SI, DESACTIVA CERRADURA
+        BRA     EIN3                    ;SKIP V
+EIN25   INC     PORTEDL                 ;INCREMENTA CONTADOR
+        BSET    PORTECR,PDA             ;ACTIVA CERRADURA
+
+;------------------------------ CAMPANILLA
+
+EIN3    INC     CADG+0                  ;INCREMENTA GENERADOR CADENCIA
+        BEQ     EIN3                    ;0 ? SI ,REPITE (0 PROHIBIDO)
+EIN31   INC     CADG+1                  ;INCREMENTA GENERADOR CADENCIA
+        BEQ     EIN31                   ;0 ? SI ,REPITE (0 PROHIBIDO)
+EIN32   INC     CADG+2                  ;INCREMENTA GENERADOR CADENCIA
+        BEQ     EIN32                   ;0 ? SI ,REPITE (0 PROHIBIDO)
+EIN33   INC     CADG+3                  ;INCREMENTA GENERADOR CADENCIA
+        BEQ     EIN33                   ;0 ? SI ,REPITE (0 PROHIBIDO)
+        BRCLR   0,CADG,EIN25HZ          ;ESTE CICLO VALE SI ,SALTA
+        CLR     PDB                     ;TODOS OFF NO AFECTA BIT'S DE DIAL
+        CLI                             ;BORRA INT.
+        RTI
+
+;----------------------------- CAMPANILLA
+
+EIN25HZ LDX     #3                      ;SEL INT. 4
+SCAN1   LDA     F0,X                    ;CARGA FLAGS DEL INTERNO [X]
+        STA     L0                      ;CARGA WORKAREA
+        LDA     F1,X                    ;CARGA FLAGS DEL INTERNO [X]
+        STA     L1                      ;CARGA WORKAREA
+        BRCLR   COL,L0,SCAN1F           ;DESCOLGADO? ,TERMINA
+        LDA     CADG,X                  ;CARGA GENERADOR DE CADENCIA
+        BRCLR   RETENGO,L1,SCAN1NA      ;RETIENE? SI, SUENA
+SCAN1RE AND     #CA.AVIS                ;SUENA?
+        BEQ     SCAN1SU                 ;SI, SALTA
+SCAN1NA AND     CAD,X                   ;FILTRA
+        BNE     SCAN1F                  ;NO SUENA
+SCAN1SU LDA     MASK1,X                 ;CARGA BIT
+        ORA     PDB                     ;BIT EN 1 Y RESTO IGUAL
+        STA     PDB                     ;SETEA
+SCAN1F  DECX                            ;SEL INT. SIGUIENTE
+        BPL     SCAN1                   ;NO ,SIGUENTE
+        CLI                             ;BORRA INT.
+        RTI
+
+        END                             ;FIN DEL EXIN.SEG
+;
+

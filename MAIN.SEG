@@ -1,0 +1,196 @@
+;
+;******  Central Telefonica 1 x 4 + portero version 1.0      21 abr 88  ******
+;*                                                                           *
+;*       Segmento: MAIN.SEG                                                  *
+;*       Funcion : Loop principal, gestion de comunicaciones entre           *
+;******            internos.                                            ******
+;
+;
+        CLRX                            ;SEL INTERNO
+SCANINT STX     XL                      ;SALVA PUNTERO LOCAL
+        LDA     F0,X                    ;FLAGS 0-7  > ACC.
+        STA     L0                      ;ACC. > WORKAREA0
+        LDA     F1,X                    ;FLAGS 8-15 LOCALES > ACC.
+        STA     L1                      ;ACC. > WORKAREA1 LOCAL
+        LDA     F2,X                    ;FLAGS 16-23 LOCALES > ACC.
+        STA     L2                      ;ACC. > WORKAREA2 LOCAL
+        LDA     F3,X                    ;FLAGS 24-31 LOCALES > ACC.
+        STA     L3                      ;ACC. > WORKAREA2 LOCAL
+        LDA     CAT,X                   ;CATEGORIA > ACC.
+        STA     L4                      ;ACC. > WORKAREA CATEGORIA
+
+        LDX     XD,X                    ;X PUNTERO DESTINO
+        STX     XN                      ;PRESETEA XN POR SI NO SE USA
+        LDA     F0,X                    ;FLAGS 0-7  > ACC.
+        STA     D0                      ;ACC. > WORKAREA0 DESTINO
+        LDA     F1,X                    ;FLAGS 8-15 DESTINO > ACC.
+        STA     D1                      ;ACC. > WORKAREA1 DESTINO
+        LDA     F2,X                    ;FLAGS 16-23 DESTINO > ACC.
+        STA     D2                      ;ACC. > WORKAREA2 DESTINO
+        LDA     CAD,X                   ;CADENCIA DESTINO > ACC.
+        STA     CADWD                   ;ACC. ? WORKAREA CADENCIA DESTINO
+        LDX     XL                      ;RECUPERA PUNTERO LOCAL
+
+        BRSET   0,L4,NOCAT1             ;ES CAT 1? NO,SALTA
+        BSET    OCUPADO,L1              ;SI SET OCUPADO
+        LDA     #TO.NOTO                ;SELE TONO NULO
+        STA     CAD,X                   ;BORRA TODO SONIDO
+        JMP     EXIT                    ;CHAU
+NOCAT1  BRSET   COL,L0,COLGADO          ;INTERNO COLGADO? SI, SALTA
+
+;------------------------------ DESCOLGADO
+
+DESCOLG BSET    OCUPADO,L1              ;DESCOLGADO = OCUPADO
+        BCLR    PASADA1,L3              ;PARACUANDO CUELGUE
+        BRCLR   PONTONO,L2,RECIBE.      ;PONGO EL TONO? NO, SALTA
+        BCLR    PONTONO,L2              ;RESET FLAG
+        LDA     #TO.DISC                ;SELE TONO CONTINUO
+        STA     CAD,X                   ;SETEA
+RECIBE. BRCLR   RECIBIR,L1,LLAMAR.      ;NO RECIBE, SALTA
+        BCLR    RECIBIR,L1              ;SI RECIBE, RESET EL FG
+        BRSET   LLAMADA,L1,ESRETRO      ;SI LLAMADA & RECIBIR SET ES RETRO
+        BSET    CONECTE,L1              ;ME LLAMAN, LE PERMITO
+        BRA     DISCOMM                 ;
+ESRETRO BCLR    RETRORQ,L1              ;ES RETROLLAMADA, RESET FG Y A LLAMAR
+LLAMAR. BRCLR   LLAMADA,L1,DISCOMM      ;NO LLAMA, SALTA                (4)
+        BRSET   LOTENGO,L1,SILOTEN      ;[D] CAPTURADO, SALTA
+        BRCLR   OCUPADO,D1,CAPTURA      ;[D] LIBRE, SALTA
+        LDA     #TO.OCUP                ;SELE TONO OCUPADO              (1)
+        STA     CAD,X                   ;SET EN [O]
+        BRA     DISCOMM                 ;
+CAPTURA BSET    OCUPADO,D1              ;OCUPA EL [D]
+        BSET    RECIBIR,D1              ;PIDE CONFIRMACION A [D]
+        BSET    LOTENGO,L1              ;YA CAPTURO A SU [D]
+        TXA                             ;ACC. = MI #
+        LDX     XD,X                    ;X = PUNTERO A [D]
+        STA     XD,X                    ;# -> [D], LE DICE A [D] QUIEN LO OCUPO
+        CLR     CADG,X                  ; *
+        INC     CADG,X                  ; * SINCRONIZA GENERADOR DE CADENCIA
+        TAX                             ;RECUPERA PUNTERO LOCAL
+        LDA     #TO.LLAM                ;SELE TONO LLAMANDO
+        STA     CAD,X                   ;SET EN [O]
+        LDA     #CA.INTE                ;SELE CAMPANA INTERNA
+        STA     CADWD                   ;SET EN [D]
+        CLR     CADG,X                  ; *
+        INC     CADG,X                  ; * SINCRONIZA GENERADOR DE CADENCIA
+SILOTEN BRCLR   CONECTE,D1,DISCOMM      ;[D] NO CONFIRMO, SALTA         (2)
+        BCLR    LLAMADA,L1              ;LLAMADA LISTA, RESET FG        (3)
+        BCLR    CONECTE,D1              ;YA LA VIO, RESET FG
+        BSET    LOTENGO,D1              ;LE AVISA A [D] QUE SE TIENEN
+        LDA     #TO.NOTO                ;SELE TONO NULO
+        STA     CAD,X                   ;SET EN [O]
+        STA     CADWD                   ;SET EN [D]
+        JSR     CONNE                   ;CONECTA MATRIZ
+DISCOMM JMP     DISCOM                  ;SALTA A PROCESAR COMANDO
+
+;------------------------------ COLGADO
+
+COLGADO BRSET   PASADA1,L3,PASADA2      ;PRIMERA PASADA? NO, SALTA
+        BSET    PASADA1,L3              ;ES LA PRIMERA, RESET SEMASFORO
+        BSET    PONTONO,L2              ;TONO CUANDO DESCUELGE
+        BRSET   NOMOLES,L3,ESNOMOL      ;EVITA DESOCUPACION
+        BCLR    OCUPADO,L1              ;DESOCUPA LOCAL
+ESNOMOL BCLR    PRE1,L3                 ;RESET  SUBSET DE 1X
+        BCLR    PRE0,L3                 ;       SUBSET DE 10X
+        BCLR    PRE9,L3                 ;       SUBSET DE 9X
+        BCLR    PREX,L3                 ;       SUBSET DE 9XX
+        BCLR    DIAL,L2                 ;       BYPASS DE COMANDOS
+        BCLR    DVA,L0                  ;       DIGITO VALIDO
+        BRCLR   TRANVAL,L2,NOTRANS      ;TRANSFERIDOR VALIDO? NO, SALTA
+        BCLR    TRANVAL,L2              ;RESET FG
+        BRSET   RETENGO,L1,AUTOTR0      ;SI RETENGO, SALTA
+NOTRANS JSR     LIBERAR                 ;
+        BRA     EXIT                    ;PROVISORIO? CAMBIAR A PASADA2 !!!!!!!
+;
+AUTOTR0 BRCLR   LLAMADA,L1,AUTOTR2      ;ESTABA LLAMANDO?, NO SALTA
+        BCLR    LLAMADA,L1              ;RESET FLAG
+        BRCLR   LOTENGO,L1,AUTOTR1      ;ESTABA COMUNICADO (1), NO SALTA
+        BSET    LLAMADA,F1L             ;HACE LLAMAR A LA LINEA
+        BSET    IGNOCUP,FG              ;HACE QUE LA LINEA IGNORE EL OCUPADO
+        LDA     #0-40                   ;ACC.= 40S
+        STA     TIMEOUT                 ;SETEA TEMPO
+        BRA     AUTOTR4                 ;CLR LOTENGO,RETENGO,CAMBIO ESTINO
+AUTOTR1 BSET    TOAVISO,D1              ;RETIENE EN [D] Y PONE AVISO
+        BRA     AUTOTRF
+AUTOTR2 BRCLR   LOTENGO,L1,AUTOTR3      ;ESTABA EN DISCOMM (4)? SI, CHAU...
+        JSR     DESCONE                 ;NO, ERA CONEXION (3), CORTA AUDIO
+        BCLR    RETENGA,F4              ;DESRETIENE EN [D]
+        BSET    BPRQ,D0                 ;BEEP EN [D]
+
+AUTOTRF BSET    RETENGO,D1              ;EL [D] SI RETIENE
+AUTOTR4 BCLR    RETENGO,L1              ;YA NO RETENGO
+        BCLR    LOTENGO,L1              ;LIMPIA FG
+        LDA     XD,X                    ;CAMBIA EL [D] DE LA LINEA
+        STA     XDL                     ;SETEA
+AUTOTR3 JSR     PORTEDC                 ;POR SI TENIA LINEA RETENIDA Y PORTERO
+        LDA     #TO.NOTO                ;SELE TONO NULO
+        STA     CAD,X                   ;BORRA CAMPANAS Y TONOS
+        BRA     EXIT                    ;CHAU ...
+;
+PASADA2 BRCLR   RETRORQ,L1,EXIT         ;NO RETROLLAMA, SALTA
+        LDX     XR,X                    ;X ES PUNTERO DEL [D] DEL RETROLLAMADO
+        CPX     #4                      ;[D] ES LA LINEA?
+        BEQ     RETROLI                 ;SI, SALTA
+        LDX     XI,X                    ;NO,X ES ^  DEL [ID] DEL [D] DEL RETROL
+RETROLI STX     XN    ;PROV1                   ;SALVA EN PROXIMO DESTINO
+        LDA     F1,X                    ;CARGA FG
+        LDX     XL                      ;RECUPERA PUNTERO LOCAL
+        CPX     XN    ;PROV1                   ;TEST SI [ID][D] NO SOY YO MISMO
+        BEQ     EXIT                    ;SI, SALTA
+        AND     #1                      ;[RD] OCUPADO?
+        BNE     RETRONO                 ;[RD] OCUPADO, SALTA
+
+        BRSET   OCUPADO,L1,EXIT         ;[O] OCUPADO, SALTA
+        BSET    OCUPADO,L1              ; * SE AUTOCAPTURA Y SETEA LLAMADA Y
+        BSET    RECIBIR,L1              ; * RECIBIR INDICANDO RETROLLAMADA
+        BSET    LLAMADA,L1              ; * TAMBIEN SETEA XD CON XR
+        LDA     #TO.OCUP                ;SELE CADENCIA RETROLLAMADO
+        BRA     RETROCA                 ;SETEA Y CHAU
+RETRONO BRCLR   LLAMADA,L1,EXIT         ;NO HAY RETRO, SALTA
+        BCLR    OCUPADO,L1              ; * SE DESCAPTURA Y RESETEA LLAMADA Y
+        BCLR    RECIBIR,L1              ; * RECIBIR CANCELANDO LA RETROLLAMADA
+        BCLR    LLAMADA,L1              ; * POR OCUPACION DE [RD]
+        LDA     #TO.NOTO                ;SELE TONO NULO
+RETROCA STA     CAD,X                   ;BORRA CADENCIA RETROLLAMADA
+
+;----------------------------- EXIT
+
+EXIT    BCLR    ESLINEA,L2              ;BORRA ,LA LINEA LO SET
+        LDA     L0                      ;WORKAREA0 > ACC.
+        STA     F0,X                    ;ACC. > FLAGS 0-7
+        LDA     L1                      ;WORKAREA1 LOCAL > ACC.
+        STA     F1,X                    ;ACC. > FLAGS 8-15 LOCALES
+        LDA     L2                      ;WORKAREA2 LOCAL > ACC.
+        STA     F2,X                    ;ACC. > FLAGS 16-23 LOCALES
+        LDA     L3                      ;WORKAREA2 LOCAL > ACC.
+        STA     F3,X                    ;ACC. > FLAGS 24-31 LOCALES
+;       LDA     L4                      ;WORKAREA CATEGORIA > ACC.
+;       STA     CAT,X                   ;ACC. > CATEGORIA INTERNO
+
+        CPX     XD,X                    ;SOY YO MISMO
+        BEQ     EXIT2                   ;SI, SALTA Y NO SOBRESALVA
+        LDX     XD,X                    ;X PUNTERO DESTINO
+        LDA     D1                      ;WORKAREA1 DESTINO > ACC.
+        STA     F1,X                    ;ACC. > FLAGS 8-15 DESTINO
+        CPX     #4                      ;[D] ES LA LINEA? * (LA LINEA NO TIENE
+        BEQ     EXIT1                   ;SI, SALTA        *  CADENCIA NI F2)
+
+        LDA     D0                      ;WORKAREA0 > ACC.
+        STA     F0,X                    ;ACC. > FLAGS 0-7 DESTINO
+
+        LDA     D2                      ;WORKAREA2 DESTINO > ACC.
+        STA     F2,X                    ;ACC. > FLAGS 16-23 DESTINO
+        LDA     CADWD                   ;WORKAREA CADENACIA DESTINO > ACC.
+        STA     CAD,X                   ;ACC. > CADENCIA DESTINO
+EXIT1   LDX     XL                      ;RECUPERA PUNTERO LOCAL EN X
+EXIT2   LDA     XN                      ;PUNTERO PROXIMO DESTINO > ACC.
+        STA     XD,X                    ;PROXIMO DESTINO > DESTINO
+        JSR     MATRIZ                  ;TRAER LA RUTINA AQUI. (OJO USA XL)
+        INCX                            ;SIGUIENTE INTERNO
+        CPX     #4                      ;ERA EL ULTIMO?
+        BEQ     BLINEA                  ;SI, SALTA A LA LINEA
+        JMP     SCANINT                 ;NO, SIGUIENTE INTERNO
+
+        END                             ;FIN DEL MAIN.SEG
+;
+

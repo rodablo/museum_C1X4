@@ -1,0 +1,236 @@
+;
+;******  Central Telefonica 1 x 4 + portero version 1.0      21 abr 88  ******
+;*                                                                           *
+;*       Segmento: LINE.ASG                                                  *
+;*       Funcion : Atencion de la LINEA                                      *
+;******                                                                 ******
+;
+;
+BLINEA  LDA     F1L                     ;FLAGS 8-15 LOCAL > ACC.
+        STA     L1                      ;ACC. > WORKAREA1 LOCAL
+        LDX     XDL                     ;X PUNTERO DESTINO LINEA
+        LDA     F0,X                    ;FLAGS 0-7 DESTINO > ACC.
+        STA     L0                      ;ACC. > WORKAREA0 DESTINO
+        LDA     F1,X                    ;FLAGS 8-15 DESTINO > ACC.
+        STA     D1                      ;ACC. > WORKAREA1 DESTINO
+        LDA     F2,X                    ;FLAGS 16-23 DESTINO > ACC.
+        STA     D2                      ;ACC. > WORKAREA2 DESTINO
+        LDA     CAD,X                   ;CADENCIA DESTINO > ACC.
+        STA     CADWD                   ;ACC. ? WORKAREA CADENCIA DESTINO
+        LDA     CAT,X                   ;CATEGORIA > ACC.
+        STA     L4                      ;ACC. > WORKAREA CATEGORIA
+        BSET    LINEACT,FG              ;INDICA A SUB'S QUE LLAMA LINEA
+        BRCLR   ONLINEA,F4,NOONL        ;ESTA CONECTADO? SI, SALTA
+        JMP     SIONL
+
+;----------------------------- OFFLINEA
+
+NOONL   BRSET   OCUPADO,L1,SIOCUP       ;ESTA OCUPADO? SI, SALTA
+        BRCLR   7,RINGVAL,LEXIT2        ;HAY RING? NO, SALTA Y CHAU
+        BRSET   7,TIMEOUT,LEXIT2        ;*** VER SUBIDA DEL RING ****
+        BSET    OCUPADO,L1              ;SI, COMIENZA LA RONDA SE AUTOOCUPA
+        BSET    LLAMADA,L1              ;ACTIVA LLAMADA
+        LDA     XDENT                   ;CARGA ENTRANTE
+        STA     XDL                     ;SETEA
+        LDA     #0-30                   ;30S EN EL PRINCIPAL
+        BSET    XDLASTF,F4              ;MARCA COMIENZO DE LA ROTACION
+        STA     TIMEOUT                 ;SETEA
+        BRA     LEXIT1                  ;CHAU
+
+SIOCUP  BRCLR   RECIBIR,L1,ALLAMAR      ;TENGO QUE RECIBIR? ,NO SALTA
+        BCLR    RECIBIR,L1              ;SI, RESET FLAG
+        BSET    CONECTE,L1              ;ME LLAMAN LE PERMITO
+        BSET    ESLINEA,D2              ;LE CONFIRMA QUE [D] ES LINEA
+        BSET    ONLINEA,F4              ;CONEXION LOGICA
+        CLR     DBUFF0                  ;CONEXION FISICA
+        BSET    DIAL,D2                 ;INHABILITA COMANDOS EN [D]
+        BCLR    FIRSTDG,F4              ;BORRA FLAG
+        LDA     #0-120                  ;2MI PARA TIMEOUT DE NO DISCAN
+        STA     TIMEOUT                 ;SETEA TEMPO
+        BRA     LEXIT1                  ;CHAU
+
+ALLAMAR BRCLR   LLAMADA,L1,NOLLAMA      ;HAY QUE LLAMAR? NO, SALTA
+        JSR     LLAMAR                  ;LLAMA
+        BRSET   LLAMADA,L1,ENTRO0       ;YA ESTA? NO, SALTA
+        STX     XDLAST                  ;ACTUALIZA ROTACION ;BORRA CAP EXTE?
+        BRA     ENTRO                   ;CHEQUEA Y CHAU
+ENTRO0  BRSET   CAPEXTE,FG,SIGUIEN      ;HAY CAPTURA? SI, SALTA
+        BRCLR   LOTENGO,L1,SIGUIEN      ;[D] ESTA OCUPADO? SI, SALTA
+        BRCLR   7,TIMEOUT,SIGUIEN       ;CHAU CON ESTE INTERNO
+ENTRO   BRSET   7,RINGVAL,LEXIT1        ;TODAVIA LLAMA? SI, SALTA
+        JSR     LIBERAR                 ;LIBERA INTERNO
+LEXIT2  BRA     LEXIT1                  ;CHAU
+
+SIGUIEN JSR     LIBERAR                 ;LIBERA INTERNO
+        BRCLR   CAPEXTE,FG,SIGUIE3      ;HAY CAPTURA? NO, SALTA
+        BCLR    CAPEXTE,FG              ;RESET FG
+        LDA     CAPEXBU                 ;ACC = ORIGEN
+;       BSET    LOTENGO,L1
+        BSET    IGNOCUP,FG              ;IGNORA EL OCUPADO
+        BRA     SIGUIE2                 ;SET XDL, LLAMADA Y CHAU
+
+SIGUIE3 BRCLR   XDLASTF,F4,SIGUIE1      ;ES EL PRIMERO DE LA RONDA? NO, SALTA
+        BCLR    XDLASTF,F4              ;SI, RESET FLAG
+        LDA     XDLAST                  ;CARGA ULTIMO EN ATENDER
+        CMP     XDL                     ;ES EL 18?
+        BNE     SIGUIE2                 ;NO, SALTA
+        BRA     SIGUIE4                 ;SI, SALTA A LLAMAR AL SIGUIENTE
+SIGUIE1 LDA     XDL                     ;CARGA ULTIMO INTERNO
+SIGUIE4 INCA                            ;INCREMENTA
+        AND     #3                      ;FILTRA 0-3
+SIGUIE2 STA     XDL                     ;SETEA
+        BSET    LLAMADA,L1              ;ACTIVA LLAMADA
+        LDA     #0-10                   ;10S EN EL PRINCIPAL
+        STA     TIMEOUT                 ;SETEA
+        BRA     LEXIT1                  ;CHAU
+
+NOLLAMA BSET    7,DBUFF0                ;DESCONEXION FISICA
+        BRSET   7,TIMEOUT,LEXIT1        ;HAY TIMEOUT? NO, SALTA
+        CLR     RINGVAL                 ; * VER TRANSITORIOS
+        LDA     #0-4                    ; * ACC. = 4S
+        STA     TIMEOUT                 ; * SET TEMPO
+        BCLR    OCUPADO,L1              ;DESOCUPA LINEA
+        BCLR    RETENGA,F4              ;BORRA RETENGA
+        BSET    MUSIC,PDA               ;SACA MUSICA
+        CLR     DPOINT                  ;BORRA PUNTERO
+LEXIT1  JMP     LEXIT                   ;CHAU
+
+;----------------------------- ONLINEA
+
+SIONL   BRSET   RETENGA,F4,RETELIN      ;RETENCION? SI, SALTO
+
+;----------------------------- SIN RETENCION
+
+        BRCLR   RETENGO,D1,NORETEN      ;NO, ESTABA RETENIENDO? NO,SALTA
+        BCLR    RETENGO,D1              ;RESET FLAG
+        BSET    MUSIC,PDA               ;SACA MUSICA
+        BSET    LOTENGO,D1              ;LE AVISA A [D] QUE SE TIENEN
+        BSET    LOTENGO,L1              ;RECUPERO, LO TIENE
+        LDA     #4                      ;ACC.= AL # DE LA LINEA
+        STA     XD,X                    ;LINEA ES [D] DEL [D]
+        BSET    LINEA,D2                ;RECONECTA AUDIO
+        BCLR    TOAVISO,D1              ;BORRA AVISO (SI LO HABIA)
+
+NORETEN BRCLR   LOTENGO,L1,CHAUONL      ;TENGO A [D]? NO, SALTA PROV!!!!!
+        BSET    ESLINEA,D2              ;REFRESCA EL FLAG EN [D]
+        BRCLR   DIAL,D2,LEXIT1          ;[D] PUEDE DISCAR? NO, SALTA
+
+;------------------------------ BUFDIAL
+
+        BCLR    LINEA,D2                ;DESCONECTA TEMPORALMENTE
+        BRSET   DTID,F4,VERDVA          ;ESTA DISCANDO? SI, SALTA A ACUMULAR
+        BSET    LINEA,D2                ;NO, RECONECTA LINEA
+        LDA     DPOINT                  ;HAY ALGO PENDIENTE?
+        BEQ     VERDVA                  ;NO, SALTA
+        LDA     DBUFF1                  ;CARGA PROXIMO
+        STA     DBUFF0                  ;CORRE 1 LUGAR
+        LDA     DBUFF2                  ;CARGA PROXIMO
+        STA     DBUFF1                  ;CORRE 1 LUGAR
+        DEC     DPOINT                  ;ACTUALIZA PUNTERO
+VERDVA  BRCLR   DVA,L0,NODVA            ;DISCARON ALGO? NO,SALTA
+        BCLR    DVA,L0                  ;SI, BORRA FLAG
+        LDA     DIGITO,X                ;CARGA DIGITO
+        BRSET   3,L4,CAT5DVA            ;TIENE CATEGORIA 5? SI, SALTA
+        BRSET   FIRSTDG,F4,CAT5DVA      ;SI, YA DISCARON EL PRIMERO? SI, SALTA
+        CMP     #10                     ;ES 0?
+        BEQ     CAT5BYE                 ;SI, CUELGA LA LINEA
+CAT5DVA INC     DPOINT                  ;INCREMENTA PUNTERO ESPERA
+;       LDA     DIGITO,X                ;CARGA DIGITO
+        LDX     DPOINT                  ;X= ^NUEVO LUGAR
+        STA     DBUFF0,X                ;AL BUFFER DE ESPERA
+        LDX     XDL                     ;RECUPERA PUNTERO LOCAL
+        BSET    FIRSTDG,F4              ;YA SE DISCO UNO, SET FLAG
+        LDA     #0-10                   ;10 SEGUNDOS HASTA RESET DIAL
+        STA     TIMEOUT                 ;SETEA TEMPO
+NODVA   BRSET   7,TIMEOUT,LEXIT         ;HAY TIMEOUT? NO, SALTA
+        BRSET   FIRSTDG,F4,FIRSTOK      ;SI, YA DISCARON EL PRIMERO? SI, SALTA
+CAT5BYE JSR     LIBERAR                 ;NO, ACA CORTA
+        BRA     LEXIT                   ;CHAU
+
+FIRSTOK BCLR    DIAL,D2                 ;SI, RESET BYPASS DE COMM
+        BSET    BPRQ,L0                 ;AVISA CON BEEP
+        BRA     LEXIT                   ;CHAU...
+
+CHAUONL BCLR    ONLINEA,F4              ;NO, COLGO Y Y CUELGO YO
+        LDA     #50                     ;50 X 20 MS
+        STA     TIMEDIV                 ;RESETEA SUBDIVISOR
+        BCLR    TOAVISO,D1              ;BORRA AVISO (SI LO HABIA)
+        LDA     #0-1                    ;ACC. = 1S
+        STA     TIMEOUT                 ;SET TEMPO
+        BRA     LEXIT                   ;CHAU...
+
+;----------------------------- CON RETENCION
+
+RETELIN BRSET   LLAMADA,L1,LLRETEN      ;A LLAMAR
+        BRSET   RETENGO,D1,SIRETEN      ;ESTABA RETENIENDO? SI,SALTA
+        BSET    RETENGO,D1              ;RESET FLAG
+        BCLR    MUSIC,PDA               ;PONE MUSICA
+        BCLR    LOTENGO,D1              ;LE AVISA A [D] QUE QUEDA LIBRE
+        BCLR    LOTENGO,L1              ;[D] RETUVO, YA NO LO TIENE
+        BCLR    LINEA,D2                ;DESCONECTA
+        LDA     #0-120                  ;2 MINUTOS DE RETENCION
+        STA     TIMEOUT                 ;SET TEMPO
+        BCLR    CONFERE,FG      ;REVISAR
+
+SIRETEN BRSET   CONFERE,FG,LEXIT        ;HAY CONFE? SI NO TEST CAPTURA
+        BRCLR   CAPEXTE,FG,SIRETE1      ;HAY CAPTURA? NO, SALTA
+        BCLR    CAPEXTE,FG              ;RESET FLAG
+        BCLR    RETENGO,D1              ;LIBERA [D]
+        BCLR    TOAVISO,D1              ;BORRA AVISO (SI LO HABIA)
+        LDA     CAPEXBU                 ;ACC. = ORIGEN DE LA CAPTURA
+        STA     XDL                     ;NUEVO [D]
+        BCLR    RETENGA,F4              ;DESRETIENE EN NUEVO [D]
+        BRA     LEXIT                   ;CHAU
+
+SIRETE1 BRSET   7,TIMEOUT,LEXIT         ;HAY TIMEOUT? NO, SALTA
+        BCLR    RETENGO,D1              ;RESET FLAG
+        BCLR    TOAVISO,D1              ;BORRA AVISO (SI LO HABIA)
+        BRA     LLRETE2                 ;SSET INTERNO 2 Y CHAU
+
+LLRETEN JSR     LLAMAR                  ;LLAMA
+        BRCLR   LLAMADA,L1,LEXIT        ;SIGUE LLAMANDO? NO, SALTA
+        BRSET   CAPEXTE,FG,LLRETE3      ;HAY CAPTURA? SI, SALTA
+        BRSET   7,TIMEOUT,LEXIT         ;HAY TIMEOUT? NO, SALTA
+LLRETE3 JSR     LIBERAR                 ;SI, LIBERA INTERNO
+        BRCLR   CAPEXTE,FG,LLRETE4      ;HAY CAPTURA? NO, SALTA
+        BCLR    CAPEXTE,FG              ;RESET FG
+
+        LDA     CAPEXBU                 ;ACC = ORIGEN
+        STA     XDL                     ;SET NUEVO ORIGEN
+        BSET    IGNOCUP,FG              ;IGNORA EL OCUPADO
+        BRA     LLRETE5                 ;SET LLAMADA Y CHAU
+
+LLRETE4 TSTX                            ;[D] = 2
+        BEQ     CHAUONL                 ;SI, SALTA
+LLRETE2 CLR     XDL                     ;SELE INTERNO 2
+LLRETE5 LDA     #0-20                   ;ACC.= 20S
+        STA     TIMEOUT                 ;SET TEMPO
+        BSET    LLAMADA,L1              ;A LLAMAR
+        BRA     LEXIT                   ;CHAU
+
+;----------------------------- LEXIT
+
+LEXIT   LDA     L1                      ;WORKEREA1 LOCAL > ACC.
+        STA     F1L                     ;ACC. > FLAGS 8-15 > LINEA
+        LDA     L0                      ;WORKAREA0 DESTINO > ACC.
+        STA     F0,X                    ;ACC. > FLAGS 0-7 DESTINO
+        LDA     D1                      ;WORKAREA1 DESTINO > ACC.
+        STA     F1,X                    ;ACC. > FLAGS 8-15 DESTINO
+        LDA     D2                      ;WORKAREA2 DESTINO > ACC.
+        STA     F2,X                    ;ACC. > FLAGS 16-23 DESTINO
+        LDA     CADWD                   ;WORKAREA CADENACIA DESTINO > ACC.
+        STA     CAD,X                   ;ACC. > CADENCIA DESTINO
+        BCLR    LINEACT,FG              ;INDICA A SUB'S QUE LLAMA LINEA
+
+;----------------------------- WAITINT VENTANA PARA INTERRUPCIONES
+
+        CLI                             ;HABILITA LAS INTERRUPCIONES
+WAITINT BRSET   WA,FG,WAITINT           ;ESPERA LA INTERRUPCION
+        BSET    WA,FG                   ;SETEA EL FLAG PARA PROXIMA PASADA
+        SEI                             ;INHABILITA LAS INTERRUPCIONES
+        CLRX                            ;RESELECCIONA INT 2
+        JMP     SCANINT                 ;OTRA VUELTA
+
+        END                             ;FIN DEL LINE.SEG
+;
+

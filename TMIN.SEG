@@ -1,0 +1,109 @@
+;
+;******  Central Telefonica 1 x 4 + portero version 1.0      21 abr 88  ******
+;*                                                                           *
+;*       Segmento: TMIN.SEG                                                  *
+;*       Funcion : Decodificacion del discado, generacion del tono base,     *
+;******            generacion del BEEP.                                 ******
+;
+;
+;
+TIN     LDA     #TDLY                   ;CARGA DELAY
+        STA     TD                      ;CARGA TIMER
+        BCLR    WA,FG                   ;HABILITA SALIDA DEL LOOP DE HALT
+
+        BRCLR   RINGDET,PDA,TIN0        ;HAY RING? SI, SALTA
+        LDA     #5                      ;NO, 100 PASADAS (0.3S)
+        STA     RINGCNT                 ;AL CONTADOR
+        BRA     TIN1                    ;CHAU
+TIN0    DEC     RINGCNT                 ;DEC ANCHO
+        BNE     TIN1                    ;FALTAN PASADAS, SALTA
+        LDA     #0-7                    ;ACC. = 8S
+        STA     RINGVAL                 ;SETEA
+
+TIN1    LDX     #3                      ;SEL INT. 4
+SCAN2   LDA     F0,X                    ;CARGA FLAGS DEL INTERNO [X]
+        STA     L0                      ;CARGA WORKAREA
+        LDA     F1,X                    ;CARGA FLAGS DEL INTERNO [X]
+        STA     L1                      ;CARGA WORKAREA
+
+;------------------------------ TONO / DISCADO
+
+        LDA     MASK0,X                 ;ACC. = MASCARA
+        BIT     PDB                     ;MARK O SPACE ?
+        BNE     SPACE                   ;0, SALTA A SPACE
+MARK    BRSET   COL,L0,TONOGEN          ;COLGADO ? ,SI SALTA
+        INC     TMARK,X                 ;NO ,INC TIEMPO
+        LDA     TMARK,X                 ;CARGA TIEMPO
+        CMP     #MRKL                   ;PULSO VALIDO ?
+        BLO     TONOGEN                 ;NO ,SALTA
+        BSET    PPE,L0                  ;SET FG PULSO PENDIENTE
+        BCLR    TID,L0                  ;RESET FG INTER DIGITO
+        CLR     TSPACE,X                ;RESET TIEMPO SPACE
+        LDA     TMARK,X                 ;CARGA TIEMPO
+        CMP     #MRKH                   ;COLGO ?
+        BLO     TONOGEN                 ;NO, SALTA
+        BSET    COL,L0                  ;SET   FG COLGADO
+        BCLR    PPE,L0                  ;RESET FG PULSO PENDIENTE
+        BCLR    DPE,L0                  ;RESET FG DIGITO PEN.(POR SI CUELGA)
+        BRA     TONOGEN
+SPACE   BRSET   TID,L0,TONOGEN          ;SI ,SALTA
+        INC     TSPACE,X                ;NO ,INC TIEMPO
+        LDA     TSPACE,X                ;CARGA TIEMPO
+        CMP     #SPCL                   ;PULSO VALIDO ?
+        BLO     TONOGEN                 ;NO ,SALTA
+        BCLR    COL,L0                  ;RESET FG COLGADO
+        CLR     TMARK,X                 ;RESET TIEMPO MARK
+        BRCLR   PPE,L0,NPPE             ;PULSO PENDIENTE ? NO ,SALTA
+        BRSET   DPE,L0,NDPE             ;NUEVO DIGITO ?  NO ,SALTA
+        CLR     DIGITO,X                ;SI ,RESET ANTERIOR
+NDPE    BCLR    PPE,L0                  ;RESET PULSO PENDIENTE
+        BSET    DPE,L0                  ;SET DIGITO PENDIENTE
+        INC     DIGITO,X                ;INC DIGITO
+NPPE    LDA     TSPACE,X                ;CARGA TIEMPO
+        CMP     #SPCH                   ;TID VALIDO ?
+        BLO     TONOGEN                 ;NO ,SALTA
+        BSET    TID,L0                  ;SI ,SET FG INTER DIGITO
+        BRCLR   DPE,L0,TONOGEN          ;HAY DIGITO PENDIENTE ? NO ,SALTA
+        BCLR    DPE,L0                  ;RESET FG DIGITO PENDIENTE
+        BSET    DVA,L0                  ;SET   FG DIGITO VALIDO
+
+;------------------------------ GENERACION TONO
+
+TONOGEN BRSET   COL,L0,SCANFIN          ;COLGADO?  SI ,SALTA
+        BRSET   BPBIT,CADG,TONOBP       ;
+        BRCLR   BPOK,L0,TONOBPN         ;SUENA NO ,SALTA
+        BCLR    BPRQ,L0                 ;SET FG YA SONO
+        BRA     TONOBPS                 ;AL ENTRY
+TONOBP  BRCLR   BPRQ,L0,TONOBPJ         ;
+        BSET    BPOK,L0                 ;
+        BRA     TONOBPN                 ;
+TONOBPJ BCLR    BPOK,L0                 ;RESET FG
+TONOBPN BSET    NOTO,L0                 ;SET NO HAY TONO
+        LDA     CADG,X                  ;CARGA GENERADOR DE CADENCIA
+        BRCLR   TOAVISO,L1,TONOAVN      ;HAY TONO AVISO? NO, SALTA
+        AND     #TO.AVIS                ;CORRESPONDE SONAR?
+        BEQ     TONOBPS                 ;SI, SALTA
+TONOAVN AND     CAD,X                   ;FILTRA
+        BNE     SCANFIN                 ;NO SUENA
+TONOBPS BCLR    NOTO,L0                 ;BORRA "NO HAY TONO"
+        LDA     MASK0,X                 ;CARGA BIT
+        COMA                            ;INVIERTE PARA EL AND
+        AND     PDB                     ;BIT EN 0 Y RESTO IGUAL
+        STA     PDB                     ;SETEA
+        LDA     #MASK00                 ;CARGA CONFIG. NORMAL
+        ORA     MASK0,X                 ;BIT EN OUT
+        STA     DDRB                    ;SETEA
+        LDA     #MASK00                 ;CARGA CONFIG. NORMAL
+        STA     DDRB                    ;TODO EN INPUT
+SCANFIN LDA     L0                      ;CARGA FLAGS
+        STA     F0,X                    ;SALVA WORKAREA
+        DECX                            ;SEL INT. SIGUIENTE
+        BMI     ACA                     ;NO ,SIGUENTE
+        JMP     SCAN2
+ACA     BCLR    TREQ,TC                 ;BORRA TIMER INT.
+        CLI                             ;BORRA LA INT.
+        RTI                             ;RETORNA
+
+        END                             ;FIN DEL TMIN.SEG
+;
+

@@ -1,0 +1,206 @@
+;
+;******  Central Telefonica 1 x 4 + portero version 1.0      21 abr 88  ******
+;*                                                                           *
+;*       Segmento: COMM.SEG                                                  *
+;*       Funcion : Decodifica los comandos y efectua las acciones            *
+;******            correspondientes.                                    ******
+;
+;
+;
+;------------------------------- COMANDOS
+
+DISCOM  BRSET   DIAL,L2,CEXIT2          ;ESTA EL BYPASS? SI, SALTA
+        BRCLR   DVA,L0,CEXIT2           ;NO HAY DIGITO?, SALTA
+        BCLR    DVA,L0                  ;HAY LO BORRA
+        LDA     DIGITO,X                ;COMMANDO > ACC.
+
+        BCLR    ENTRE25,FG              ;BORRA INTERNO VALIDO
+        DECA                            ; * AJUSTA EL
+        DECA                            ; * NUMERO
+        BMI     DISCOM0                 ;ES MENOR QUE 2, SI, SALTA
+        CMP     #3                      ;ES MAYOR QUE 5
+        BHI     DISCOM0                 ;SI, SALTA
+        BSET    ENTRE25,FG              ;ES INTERNO VALIDO
+
+;------------------------------- CAPTURA [11]
+
+DISCOM0 BRCLR   PRE1,L3,PRE0.           ;SUBSET DE 1X?, N0 SALTA
+        BCLR    PRE1,L3                 ;BORRA PRE1
+        CMP     #1-2                    ;COM ES 1?
+        BNE     PRE1.1                  ;NO, SALTA
+
+        BRSET   CONFERE,FG,CEXIT1       ;ES CONFERENCIA? SI, CHAU
+        BRSET   LLAMADA,F1L,PRE1.0      ;ES CAPTURA. LINEA LLAMA? SI,SALTA
+        BRCLR   RETENGA,F4,CEXIT1       ;LINEA RETIENE? NO, CHAU
+        BSET    RETENGO,L1              ;
+        BRA     PRE1.3                  ;SET ORIGEN, FG DE CAPTURA Y CHAU
+
+PRE1.0  BSET    CONECTE,L1              ;PARA LLAMAR
+PRE1.3  BSET    CAPEXTE,FG              ;ORDENA A LA LINEA QUE SE CONECTE
+        STX     CAPEXBU                 ;# ES ORIGEN
+CEXIT2  BRA     CEXIT1                  ;CHAU
+
+;------------------------------- REPUNTEO [18]
+
+PRE1.1  CMP     #8-2                    ;COM ES 8?
+        BNE     PRE1.2                  ;NO, SALTA
+        STX     XDENT                   ;SI, # > PUNTERO LLAMADA ENTRANTE
+        JMP     CEXITBE                 ;CHAU Y BEEP DE CONFIRMACION
+
+PRE1.2  CMP     #10-2                   ;COM ES 0?
+        BNE     CEXIT1                  ;NO, SALTA
+        BSET    PRE0,L3                 ;SI, COMANDOS CON 10X
+        BRA     CEXIT1                  ;CHAU
+
+;------------------------------- SIGUEME [10I],NO MOLESTAR [109]
+
+PRE0.   BRCLR   PRE0,L3,PRE9.           ;SUBSET DE 10X? NO, SALTA
+        BCLR    PRE0,L3                 ;BORRA PRE0
+        CMP     #9-2                    ;ES NO MOLESTAR?
+        BNE     PRE0.0                  ;NO SALTA
+        BSET    NOMOLES,L3              ;SET FLAG DE NODESOCUPA
+        BRA     PRE0.1                  ;BEEP Y TERMINA
+
+PRE0.0  BRCLR   ENTRE25,FG,CEXIT1       ;ES INTERNO? NO, SALTA
+        STA     XI,X                    ;SET NUMERO INTERNO INDIRECTO
+        BCLR    NOMOLES,L3              ;BORRA POSIBLE NO MOLESTAR
+PRE0.1  BRA     CEXITBE                 ;CHAU Y BEEP DE CONFIRMACION
+
+;------------------------------- CATEGORIZACION. [9IC]
+
+PRE9.   BRCLR   PRE9,L3,PREX.           ;SUBSET DE 9X? NO, SALTA
+        BCLR    PRE9,L3                 ;BORRA PRE9
+        BRCLR   ENTRE25,FG,CEXIT1       ;ES INTERNO? NO, CHAU
+        STA     CATI                    ;GUARDA EL INTERNO
+        BSET    PREX,L3                 ;A BUSCAR CATEGORIA
+        BRA     CEXIT1                  ;CHAU
+
+PREX.   BRCLR   PREX,L3,COMM1           ;SUBSET DE 9XX? NO, SALTA
+        BCLR    PREX,L3                 ;BORRA PREX
+        INCA                            ;AJUSTA CATEGORIA 0-4
+        CMP     #4                      ;ES MAYOR QUE 4?
+        BHI     CEXIT1                  ;SI, SALTA
+        TAX                             ;X^ PUNTERO TABLA CATEGORIA
+        LDA     CATT,X                  ;CARGA GATEGORIA
+        LDX     CATI                    ;CARGA EL INTERNO
+        STA     CAT,X                   ;SETEA CATEGORIA
+        LDX     XL                      ;RECUPERA PUNTERO LOCAL
+        BRA     CEXITBE                 ;CHAU Y BEEP DE CONFIRMACION
+
+;------------------------------- RETENCION [1]
+
+COMM1   CMP     #1-2                    ;COMANDO = 1?
+        BNE     COMM25                  ;NO, SALTA
+        BRCLR   ESLINEA,L2,C1NOLIN      ;ESTOY CON LA LINEA? NO, SALTA
+        BSET    RETENGA,F4              ;ORDENA RETENER
+        BSET    PONTONO,L2              ;PONE TONO
+CEXIT1  JMP     CEXIT
+
+C1NOLIN JSR     LIBERAR                 ;SI, LIBERA LO QUE TENGA Y BORRA TONO
+        BRCLR   RETENGO,L1,C1NORET      ;ESTOY RETENIENDO? NO, SALTO
+        BCLR    RETENGA,F4              ;SI, ORDENA DESRETENER
+        BRA     CEXIT1                  ;CHAU...
+
+C1NORET BSET    PRE1,L3                 ;ES COMANDO 1X
+        BRA     CEXIT1
+
+;------------------------------- INTERNOS [2-5]
+
+COMM25  BRCLR   ENTRE25,FG,COMM8        ;ES INTERNO? NO, CHAU
+        BRCLR   1,L4,CEXIT1             ;CAT < 3 ? SI, CHAU
+        STA     DIGITO,X                ;SALVA PARA LA RELLAMADA
+        TAX                             ;X^ [ND]
+        LDA     XI,X                    ;A^ [ID][ND]
+        LDX     XL                      ;RECUPERA PUNTERO LOCAL
+        CMP     XD,X                    ;COMPARA CON EL ULTIMO DESTINO
+        BNE     COMM250                 ;<>, SALTA A COMANDO NORMAL
+        CMP     XL                      ;EL [ID] SOY YO MISMO?
+        BEQ     COMM250                 ;SI, SALTA
+
+;ACA RECUPERA EL INTERNO DIRECTO E IGNORA LA INDIRECCION?
+
+        BRCLR   LLAMADA,L1,COMM250      ;NO ESTA LLAMANDO, IDEM ANT.
+        BRSET   LOTENGO,L1,COMM250      ;NO LE DA OCUPADO, IDEM ANT.
+        LDA     DIGITO,X                ;RECUPERA INTERNO DIRECTO
+RESERLI STA     XR,X                    ;ACC. > PUNTERO RETROLLAMADA
+        BSET    RETRORQ,L1              ;SETEA RETROLLAMADA
+        JSR     LIBERAR                 ;LIBERA LA LLAMADA
+CEXITBE BSET    BPRQ,L0                 ;BEEP DE CONFIRMACION
+        BRA     CEXIT1                  ;TERMINA
+
+COMM250 STA     XN                      ;[ID][D] A NUEVO DESTINO
+        BCLR    TRANVAL,L2              ;NO ES TRASFERIDOR VALIDO
+        BRCLR   ESLINEA,L2,COMM251      ;TENGO LINEA? NO, CHAU
+        BSET    RETENGA,F4              ;ORDEN DE RETENER
+        BCLR    LOTENGO,L1          ;????? BORRA LOTENGO PARA LIBERAR
+        BSET    TRANVAL,L2              ;ES TRASFERIDOR VALIDO
+COMM251 BRCLR   RETENGO,L1,COMM252
+        BSET    TRANVAL,L2              ;ES TRASFERIDOR VALIDO
+COMM252 JSR     LIBERAR                 ;LIBERA LLAMADAS ACTUALES
+        BSET    LLAMADA,L1              ;SET PROXIMA LLAMADA
+        BRA     CEXIT
+
+;------------------------------- PORTERO ELECTRICO [8]
+
+COMM8   CMP     #8-2                    ;COMANDO = 8?
+        BNE     COMM9                   ;NO, SALTA
+        BRCLR   2,L4,CEXIT              ;CAT < 3 ? SI, CHAU
+        BRSET   PRE8,L3,COMM82
+        BRCLR   ESLINEA,L2,COMM80       ;TENGO LINEA? NO, CHAU
+        BSET    RETENGA,F4              ;ORDEN DE RETENER
+COMM80  JSR     LIBERAR                 ;LIBERA LLAMADAS ACTUALES, BORRA TONOS
+        BRCLR   PORTEOC,FG,COMM81       ;PORTERO ATENDIDO? NO, SALTA
+        LDA     #TO.OCUP                ;SELE TONO OCUPADO
+        STA     CAD,X                   ;SETEA
+        BRA     CEXIT                   ;CHAU
+COMM81  BSET    PORTEOC,FG              ;OCUPA EL PORTERO
+        BSET    PRE8,L3                 ;PREPARA PARA LA CERRADURA
+        BSET    PORTE,L2                ;CONECTA LA MATRIZ
+        BSET    PORTERL,PDA             ;CONECTA RELE PORTERO
+        BRA     CEXIT
+COMM82  LDA     #0-4                    ;4 SEGUNDOS
+        STA     PORTEDL                 ;ACTIVA TIMER CERRADURA
+        BRA     CEXITBE                 ;CHAU
+
+;------------------------------- CATEGORIZACION. [9IC]
+
+COMM9   CMP     #9-2                    ;COMANDO = 9?
+        BNE     COMM0                   ;NO, SALTA
+        TSTX                            ;ES INTERNO 2?
+        BNE     CEXIT                   ;NO, CHAU
+        JSR     LIBERAR                 ;SI, LIBERA LO QUE TENGA Y BORRA TONO
+        BSET    PRE9,L3                 ;9 ACEPTADO
+        BRA     CEXIT                   ;CHAU
+
+;------------------------------- LINEA [0]
+
+COMM0   CMP     #10-2                   ;COMANDO = 0?
+        BNE     CEXIT                   ;NO, SALTA
+        BRCLR   2,L4,CEXIT              ;CAT < 3 ? SI, CHAU
+        BRSET   RETENGO,L1,COMM0CO      ;RETIENE? SI, SALTA
+        LDA     #4                      ;ACC. = # LINEA
+        BRCLR   LLAMADA,L1,COMM0LL      ;DA OCUPADO? NO, CHAU
+        BRSET   LOTENGO,L1,COMM0LL      ;DA OCUPADO? NO, CHAU
+        CMP     XD,X                    ;EL OCUPADO ES LA LINEA?
+        BNE     COMM0LL                 ;NO, SALTO (ES LLAMADA)
+        BRA     RESERLI                 ;SI, RESERVA ,LIBERA ,BEEP Y CHAU
+
+COMM0LL BRSET   ESLINEA,L2,CEXIT        ;TENGO LINEA? SI, CHAU
+        STA     XN                      ;NO, # LINEA A NUEVO DESTINO
+        BRA     COMM251                 ;LIBERA, SET LLAMADA Y CHAU
+
+COMM0CO BRSET   LLAMADA,L1,CEXIT        ;ESTA CONECTADO? NO, CHAU
+        BRCLR   LOTENGO,L1,CEXIT        ;ESTA CONECTADO? NO, CHAU
+                                        ;SI, CONFERENCIA
+        BSET    LINEA,L2
+        BSET    LINEA,D2
+        BSET    BPRQ,L0
+        BSET    BPRQ,D0
+        BSET    MUSIC,PDA
+        BSET    CONFERE,FG
+
+CEXIT   JMP     EXIT                    ;IGNORA 6,7 Y 8
+
+        END                             ;FIN DEL COMM.SEG
+;
+

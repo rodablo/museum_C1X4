@@ -1,0 +1,136 @@
+;
+;******  Central Telefonica 1 x 4 + portero version 1.0      21 abr 88  ******
+;*                                                                           *
+;*       Segmento: RUTI.SEG                                                  *
+;******  Funcion : Rutinas verias                                       ******
+;
+;
+;
+;------------------------------ LIBERAR, LIBERA AL [D] DE MI OPERACION
+
+LIBERAR BRCLR   LLAMADA,L1,LIBERA1      ;ESTOY LLAMANDO? NO, SALTA
+        BCLR    LLAMADA,L1              ;SI, BORRA FLAG
+        BRCLR   LOTENGO,L1,LIBERF1      ;ES CASO 1 (OCUPADO)? SI, SALTA
+        BCLR    OCUPADO,D1              ;NO, ES CASO 2 (LLAMANDO) LIBERA [D]
+        BCLR    RECIBIR,D1              ;SACA AL [D] DE MODO RECIBIR
+        LDA     #TO.NOTO                ;SELE TONO NULO
+        STA     CADWD                   ;BORRA LA CAMPANA EN [D]
+        BRA     LIBERF9                 ;SALTA (Y BORRA EL LOTENGO)
+
+LIBERA1 BRCLR   LOTENGO,L1,LIBERA4      ;ES CASO 4 (NADA PENDIENTE)? SI, SALTA
+        BCLR    LOTENGO,D1              ;NO, ES CASO 3 (CONECTADO) BORRA [D]
+        BSET    PONTONO,D2              ;PONE TONO EN DESTINO
+        BRCLR   LINEACT,FG,LIBERA3      ;SOY LA LINEA? NO, SALTO
+        BCLR    LINEA,D2                ;DESCONECTO LA LINEA
+        BCLR    DIAL,D2                 ;HABILITA LOS COMANDOS
+        BRA     LIBERF9                 ;CHAU
+
+LIBERA3 BSR     DESCONE                 ;DESCONECTA LOS NODOS DE LA MATRIZ
+        BRCLR   RETENGO,D1,LIBERF9      ;
+        BCLR    PONTONO,D2              ;
+        BCLR    RETENGA,F4              ;AUTORECUPERA
+        BSET    BPRQ,D0                 ;BEEP EN [D]
+;       BCLR    CONFERE,FG              ;BORRA CONFERE SI ESTABA
+        BRA     LIBERF9                 ;CHAU
+
+LIBERA4 BRCLR   LINEACT,FG,LIBERF1      ;CASO 4, SOY LA LINEA? NO, SALTO
+        BCLR    RETENGO,D1              ;LE SACA RETENCION AL INTERNO
+        RTS                             ;CHAU
+
+LIBERF9 BCLR    LOTENGO,L1              ;
+LIBERF1 BRSET   LINEACT,FG,LIBERF2      ;SOY LA LINEA? SI, SALTO
+        BSR     PORTEDC                 ;SI HAY PORTERO, CHAU
+        LDA     #TO.NOTO                ;SELE TONO NULO
+        STA     CAD,X                   ;BORRA LOS TONOS
+LIBERF2 RTS
+
+;------------------------------ CONNE Y DESCONE, GESTIONA NODOS DE LA MATRIZ
+
+CONNE   BRSET   ESLINEA,L2,CONN2        ;MI [D] ES LA LINEA? SI, SALTO
+        BRSET   BARR0B,FG,CONN1         ;NO, CONECTO INTERNO NORMAL
+        BSET    BARR0B,FG
+        BSET    BARR0,L2
+        BSET    BARR0,D2
+        RTS
+CONN1   BSET    BARR1,L2
+        BSET    BARR1,D2
+        RTS
+CONN2   BSET    LINEA,L2                ;ME CONECTO A LA LINEA
+        RTS
+
+DESCONE BRCLR   BARR0,L2,DESCON0        ;LA CONEXION ES EN BARRA0? NO, SALTA
+        BCLR    BARR0B,FG               ;SI, BORRA FLAG DE BARRA0 OCUPADA
+DESCON0 BCLR    BARR0,L2                ; *
+        BCLR    BARR0,D2                ; * BORRA TODAS LAS CONECCIONES A LAS
+        BCLR    BARR1,L2                ; * BARRAS EN [O] Y [D]
+        BCLR    BARR1,D2                ; *
+        BCLR    LINEA,L2                ;DESCONECTO LA LINEA
+        BRCLR   CONFERE,FG,DESCON1      ;ESTABA ES CONFERENCIA? NO, CHAU
+        BCLR    CONFERE,FG              ;BORRA CONFERE SI ESTABA
+        BCLR    LINEA,D2                ;DESCONECTO LA LINEA
+DESCON1 RTS
+
+;------------------------------ PORTEDC
+
+PORTEDC BRCLR   PRE8,L3,PRTDCC          ;TENGO EL PORTERO? NO, CHAU
+        BCLR    PRE8,L3                 ;SI, RESET FLAG
+        BCLR    PORTEOC,FG              ;RESET FLAG
+        BCLR    PORTE,L2                ;RESET AUDIO
+        BCLR    PORTERL,PDA             ;DESCONECTA INTERFASE
+PRTDCC  RTS
+
+
+;------------------------------ LLAMAR (DE LE LINEA A LOS INTERNOS)
+
+LLAMAR  BRSET   LOTENGO,L1,LLAMAR1      ;LO TIENE? SI, SALTA
+        BRCLR   IGNOCUP,FG,LLAMAR4      ;IGNORAR OCUPADO? NO, SALTA
+        BCLR    IGNOCUP,FG              ;SI, RESET FG
+        BRA     LLAMAR3                 ;LO SALTA
+LLAMAR4 BRSET   OCUPADO,D1,LLAMAR2      ;[D] OCUPADO?, SI, CHAU
+        BSET    OCUPADO,D1              ;OCUPA EL [D]
+LLAMAR3 BSET    RECIBIR,D1              ;PIDE CONFIRMACION A [D]
+        LDA     #CA.EXTE                ;SELE CAMPANA EXTERNA
+        STA     CADWD                   ;SETEA EN [D]
+        CLR     CADG,X                  ; *
+        INC     CADG,X                  ; * SINCRONIZA GENERADOR DE CADENCIA
+        BSET    LOTENGO,L1              ;YA CAPTURO SU [D]
+        LDA     #4                      ;ACC. = #
+        STA     XD,X                    ;LE DICE A [D] QUIEN LO OCUPA
+LLAMAR1 BRCLR   CONECTE,D1,LLAMAR2      ;[D] CONFIRMO? SI, SALTA     (2)
+        BCLR    LLAMADA,L1              ;LLAMADA LISTA, RESET FLAG
+        BSET    ONLINEA,F4              ;INTERNO CONTESTO, CAMBIA A LINEA
+        BCLR    RETENGA,F4              ; * REVISAR
+        BSET    MUSIC,PDA               ; *
+        BCLR    CONECTE,D1              ;YA LA VIO, RESET FLAG
+        BSET    LOTENGO,D1              ;LE AVISA A [D] QUE SE TIENEN
+        BCLR    RECIBIR,D1              ; * ESTO ES POR LA CAPTURA
+        BSET    LINEA,D2                ;CONECTA MATRIZ
+        CLR     DBUFF0                  ;CONEXION FISICA
+;       STX     XDLAST              ;?????ACUALIZA ROTACION
+        LDA     #TO.NOTO                ;BORRA CAMPANA
+        STA     CADWD                   ;SETEA EN [D]
+LLAMAR2 RTS
+
+;------------------------------ MATRIZ, ACTUALIZA CONECCIONES
+
+MATRIZ  LDA     #4                      ;CARGA CONTADOR DE BITS
+        STA     D1                      ;USA WORKAREA COMO CONTADOR
+        LDA     XL                      ;CARGA
+        LSLA                            ;ALINEA # DE INTERNO COMO FILA (INTERNO)
+        LSLA                            ;DE LA MATRIZ B3,2 (B1,0 SELE COLUMNA)
+        STA     PDC                     ;AL PUERTO
+MATLOOP BRCLR   NOTO,L0,MATCLR          ;HAY TONO SONANDO? SI, SALTA
+        BSET    DATA,PDA                ;DATA = 1 (CONECTADO)
+        ROR     L2                      ;FLAG DE CONECCION AL CARRY, CONECTA?
+        BCS     MATSTR                  ;SI, SALTA Y DEJA EN 1
+MATCLR  BCLR    DATA,PDA                ;NO, DATA = 0 (DESCONECTADO)
+MATSTR  BSET    STROBE,PDA              ;SET STROBE
+        BCLR    STROBE,PDA              ;CLR STROBE
+        INC     PDC                     ;SIGUIENTE COLUMNA-BIT
+        DEC     D1                      ;DEC CONTADOR DE BITS
+        BNE     MATLOOP                 ;FALTAN FLAGS, SI SALTA
+        RTS
+
+        END                             ;FIN DEL RUTI.SEG
+;
+
